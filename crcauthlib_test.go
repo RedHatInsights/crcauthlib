@@ -12,15 +12,18 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/redhatinsights/crcauthlib/deps"
+	identity "github.com/redhatinsights/platform-go-middlewares/v2/identity"
 	"github.com/stretchr/testify/assert"
 )
 
 var testUser = User{
 	Username:      "billy",
 	Password:      "password",
-	ID:            "1234",
+	ID:            1234,
 	Email:         "billy@billy.billy",
 	FirstName:     "Billy",
 	LastName:      "Bob",
@@ -34,6 +37,70 @@ var testUser = User{
 	DisplayName:   "Billy Bob",
 	Type:          "User",
 	Entitlements:  "",
+}
+
+type Claims struct {
+	User
+	jwt.RegisteredClaims
+	Entitlements   []string `json:"newEntitlements"`
+	ServiceAccount string   `json:"service_account,omitempty"`
+}
+
+func CreateJWT(xrhid *identity.XRHID) (string, error) {
+	privateKeyBytes, err := os.ReadFile("test_files/private.pem")
+	if err != nil {
+		return "", fmt.Errorf("failed to read private key: %w", err)
+	}
+
+	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM(privateKeyBytes)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	var entitlements []string
+	for k, v := range xrhid.Entitlements {
+		entitlement, err := json.Marshal(v)
+		if err != nil {
+			return "", fmt.Errorf("couldn't marshal entitlements: %w", err)
+
+		}
+		entitlements = append(entitlements, fmt.Sprintf("\"%s\": %s", k, entitlement))
+	}
+
+	claims := Claims{
+		User: User{
+			Username:      xrhid.Identity.User.Username,
+			Email:         xrhid.Identity.User.Email,
+			FirstName:     xrhid.Identity.User.FirstName,
+			LastName:      xrhid.Identity.User.LastName,
+			AccountNumber: xrhid.Identity.AccountNumber,
+			IsActive:      false,
+			IsOrgAdmin:    false,
+			IsInternal:    false,
+			Locale:        xrhid.Identity.User.Locale,
+			OrgID:         xrhid.Identity.Internal.OrgID,
+			Type:          "",
+			Entitlements:  "",
+		},
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24)),
+			Issuer:    "your-issuer",
+		},
+		Entitlements: entitlements,
+	}
+
+	if xrhid.Identity.Type == "ServiceAccount" {
+		claims.ServiceAccount = "true"
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+
+	tokenString, err := token.SignedString(privateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign token: %w", err)
+	}
+
+	return tokenString, nil
 }
 
 type MockHTTP struct {
@@ -264,6 +331,63 @@ func TestProcessRequestBearerAuthJWTValid(t *testing.T) {
 
 	assert.Equal(t, "User", ident.Identity.Type)
 	assert.Equal(t, "jwt-auth", ident.Identity.AuthType)
+	assert.NotEqual(t, "ServiceAccount", ident.Identity.Type)
+}
+
+func TestServiceAccountJWTValid(t *testing.T) {
+
+	xrhid := identity.XRHID{
+		Identity: identity.Identity{
+			AccountNumber:         "12345",
+			EmployeeAccountNumber: "12345",
+			OrgID:                 "54321",
+			Internal: identity.Internal{
+				OrgID:       "12345",
+				AuthTime:    0,
+				CrossAccess: false,
+			},
+			User: &identity.User{
+				Username:  "jdoe",
+				Email:     "",
+				FirstName: "",
+				LastName:  "",
+				Active:    false,
+				OrgAdmin:  false,
+				Internal:  false,
+				Locale:    "",
+				UserID:    "",
+			},
+			System:    &identity.System{},
+			Associate: &identity.Associate{},
+			X509:      &identity.X509{},
+			Type:      "ServiceAccount",
+			AuthType:  "jwt-auth",
+		},
+		Entitlements: map[string]identity.ServiceDetails{"something": {
+			IsEntitled: true,
+			IsTrial:    true,
+		}},
+	}
+
+	tokenString, err := CreateJWT(&xrhid)
+	assert.NoError(t, err)
+	assert.NotNil(t, tokenString)
+
+	keyData, _ := os.ReadFile("test_files/public.pem")
+
+	os.Setenv("JWTPEM", string(keyData))
+
+	req, _ := http.NewRequest("GET", "", nil)
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
+
+	ident, errTwo := c.ProcessRequest(req)
+
+	assert.Nil(t, errOne)
+	assert.Nil(t, errTwo)
+	assert.NotNil(t, ident)
+	assert.Equal(t, xrhid.Identity.Internal.OrgID, ident.Identity.Internal.OrgID)
+	assert.Equal(t, "ServiceAccount", ident.Identity.Type)
 }
 
 func TestProcessCookieAuthJWTValid(t *testing.T) {

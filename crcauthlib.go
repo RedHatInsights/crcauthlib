@@ -14,7 +14,7 @@ import (
 	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/golang-jwt/jwt/v4/request"
 	"github.com/redhatinsights/crcauthlib/deps"
-	"github.com/redhatinsights/platform-go-middlewares/identity"
+	identity "github.com/redhatinsights/platform-go-middlewares/v2/identity"
 )
 
 type Registration struct {
@@ -30,7 +30,7 @@ type Registration struct {
 type User struct {
 	Username      string `json:"username"`
 	Password      string `json:"password"`
-	ID            string `json:"string"`
+	ID            int    `json:"id"`
 	Email         string `json:"email"`
 	FirstName     string `json:"first_name"`
 	LastName      string `json:"last_name"`
@@ -76,7 +76,7 @@ func NewCRCAuthValidator(config *ValidatorConfig) (*CRCAuthValidator, error) {
 	return validator, nil
 }
 
-func (crc *CRCAuthValidator) ProcessRequest(r *http.Request) (*XRHID, error) {
+func (crc *CRCAuthValidator) ProcessRequest(r *http.Request) (*identity.XRHID, error) {
 	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
 		fmt.Println("incoming request: processing with cert auth")
 		return crc.processCert(r.TLS.PeerCertificates[0])
@@ -95,7 +95,7 @@ func (crc *CRCAuthValidator) ProcessRequest(r *http.Request) (*XRHID, error) {
 	}
 }
 
-func (crc *CRCAuthValidator) ProcessToken(tokenString string) (*XRHID, error) {
+func (crc *CRCAuthValidator) ProcessToken(tokenString string) (*identity.XRHID, error) {
 	identity, err := crc.processJWTToken(tokenString)
 
 	if err != nil {
@@ -179,7 +179,7 @@ func (crc *CRCAuthValidator) ValidateJWTCookieRequest(r *http.Request) (*jwt.Tok
 func (crc *CRCAuthValidator) ValidateJWTHeaderRequest(r *http.Request) (*jwt.Token, error) {
 	if crc.verifyKey == nil {
 		if err := crc.grabVerify(); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("couldn't get public key: %w", err)
 		}
 	}
 	token, err := request.ParseFromRequest(r, request.AuthorizationHeaderExtractor, func(token *jwt.Token) (interface{}, error) {
@@ -193,14 +193,14 @@ func (crc *CRCAuthValidator) ValidateJWTHeaderRequest(r *http.Request) (*jwt.Tok
 
 	if err != nil {
 		fmt.Println("couldn't validate jwt header", err.Error())
-		return nil, err
+		return nil, fmt.Errorf("couldn't validate jwt header: %w", err)
 	}
 
 	return token, nil
 }
 
 // Private Methods
-func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*XRHID, error) {
+func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*identity.XRHID, error) {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/check_registration", crc.config.BOPUrl), nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not prep request :%w", err)
@@ -232,28 +232,28 @@ func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*XRHID, error)
 		return nil, fmt.Errorf("could not unmarshal registration information")
 	}
 
-	entitlements := &map[string]Entitlement{}
+	entitlements := map[string]identity.ServiceDetails{}
 
-	ident := &XRHID{
+	ident := &identity.XRHID{
 		Identity: identity.Identity{
 			OrgID: obj.OrgID,
 			Internal: identity.Internal{
 				OrgID: obj.OrgID,
 			},
-			System: identity.System{
+			System: &identity.System{
 				CommonName: cert.Subject.CommonName,
 				CertType:   "system",
 			},
 			AuthType: "cert-auth",
 			Type:     "System",
 		},
-		Entitlements: *entitlements,
+		Entitlements: entitlements,
 	}
 
 	return ident, nil
 }
 
-func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*XRHID, error) {
+func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*identity.XRHID, error) {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/auth", crc.config.BOPUrl), nil)
 	req.SetBasicAuth(user, password)
 	if err != nil {
@@ -276,23 +276,23 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*XR
 			return nil, fmt.Errorf("error unmarshaling json: %s", err.Error())
 		}
 
-		entitlements := &map[string]Entitlement{}
+		entitlements := map[string]identity.ServiceDetails{}
 
 		if respData.User.Entitlements != "" {
-			err := json.Unmarshal([]byte(respData.User.Entitlements), entitlements)
+			err := json.Unmarshal([]byte(respData.User.Entitlements), &entitlements)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		ident := &XRHID{
+		ident := &identity.XRHID{
 			Identity: identity.Identity{
 				AccountNumber: respData.User.AccountNumber,
 				OrgID:         respData.User.OrgID,
 				Internal: identity.Internal{
 					OrgID: respData.User.OrgID,
 				},
-				User: identity.User{
+				User: &identity.User{
 					Username:  respData.User.Username,
 					Email:     respData.User.Email,
 					FirstName: respData.User.FirstName,
@@ -305,7 +305,7 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*XR
 				AuthType: "basic-auth",
 				Type:     respData.User.Type,
 			},
-			Entitlements: *entitlements,
+			Entitlements: entitlements,
 		}
 		return ident, nil
 	} else {
@@ -313,7 +313,7 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*XR
 	}
 }
 
-func (crc *CRCAuthValidator) processJWTCookieRequest(r *http.Request) (*XRHID, error) {
+func (crc *CRCAuthValidator) processJWTCookieRequest(r *http.Request) (*identity.XRHID, error) {
 	token, err := crc.ValidateJWTCookieRequest(r)
 
 	if err != nil {
@@ -323,7 +323,7 @@ func (crc *CRCAuthValidator) processJWTCookieRequest(r *http.Request) (*XRHID, e
 	return crc.buildIdent(token)
 }
 
-func (crc *CRCAuthValidator) processJWTHeaderRequest(r *http.Request) (*XRHID, error) {
+func (crc *CRCAuthValidator) processJWTHeaderRequest(r *http.Request) (*identity.XRHID, error) {
 	token, err := crc.ValidateJWTHeaderRequest(r)
 
 	if err != nil {
@@ -333,7 +333,7 @@ func (crc *CRCAuthValidator) processJWTHeaderRequest(r *http.Request) (*XRHID, e
 	return crc.buildIdent(token)
 }
 
-func (crc *CRCAuthValidator) processJWTToken(tokenString string) (*XRHID, error) {
+func (crc *CRCAuthValidator) processJWTToken(tokenString string) (*identity.XRHID, error) {
 	token, err := crc.ValidateJWTToken(tokenString)
 
 	if err != nil {
@@ -381,49 +381,67 @@ func getArrayString(claimName string, claims jwt.MapClaims) []string {
 	return listEntitle
 }
 
-func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*XRHID, error) {
-	var ident XRHID
+func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*identity.XRHID, error) {
+	var ident identity.XRHID
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 
-		entitlements := &map[string]Entitlement{}
+		entitlements := map[string]identity.ServiceDetails{}
 
 		if getArrayString("newEntitlements", claims) != nil {
 			entitlementString := fmt.Sprintf("{%s}", strings.Join(getArrayString("newEntitlements", claims), ","))
-			err := json.Unmarshal([]byte(entitlementString), entitlements)
+			err := json.Unmarshal([]byte(entitlementString), &entitlements)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("couldn't extract newEntitlements: %w", err)
 			}
 		} else {
 			entitlementString := getStringClaim("entitlements", claims)
 			if entitlementString != "" {
-				err := json.Unmarshal([]byte(entitlementString), entitlements)
+				err := json.Unmarshal([]byte(entitlementString), &entitlements)
 				if err != nil {
-					return nil, err
+					return nil, fmt.Errorf("couldn't extract old Entitlements: %w", err)
 				}
 			}
 		}
 
-		ident = XRHID{
-			Identity: identity.Identity{
-				OrgID:         getStringClaim("org_id", claims),
-				AccountNumber: getStringClaim("account_number", claims),
-				Internal: identity.Internal{
+		if getStringClaim("service_account", claims) != "true" {
+			ident = identity.XRHID{
+				Identity: identity.Identity{
+					OrgID:         getStringClaim("org_id", claims),
+					AccountNumber: getStringClaim("account_number", claims),
+					Internal: identity.Internal{
+						OrgID: getStringClaim("org_id", claims),
+					},
+					User: &identity.User{
+						Username:  getStringClaim("username", claims),
+						Email:     getStringClaim("email", claims),
+						FirstName: getStringClaim("first_name", claims),
+						LastName:  getStringClaim("last_name", claims),
+						Active:    getBoolClaim("is_active", claims),
+						OrgAdmin:  getBoolClaim("is_org_admin", claims),
+						Internal:  getBoolClaim("is_internal", claims),
+						Locale:    getStringClaim("org_id", claims),
+					},
+					AuthType: "jwt-auth",
+					Type:     "User",
+				},
+				Entitlements: entitlements,
+			}
+		} else {
+			ident = identity.XRHID{
+				Identity: identity.Identity{
 					OrgID: getStringClaim("org_id", claims),
+					Internal: identity.Internal{
+						OrgID: getStringClaim("org_id", claims),
+					},
+					AuthType: "jwt-auth",
+					Type:     "ServiceAccount",
+					ServiceAccount: &identity.ServiceAccount{
+						Username: fmt.Sprintf("service-account-%s", getStringClaim("client_id", claims)),
+						ClientId: getStringClaim("client_id", claims),
+					},
 				},
-				User: identity.User{
-					Username:  getStringClaim("username", claims),
-					Email:     getStringClaim("email", claims),
-					FirstName: getStringClaim("first_name", claims),
-					LastName:  getStringClaim("last_name", claims),
-					Active:    getBoolClaim("is_active", claims),
-					OrgAdmin:  getBoolClaim("is_org_admin", claims),
-					Internal:  getBoolClaim("is_internal", claims),
-					Locale:    getStringClaim("org_id", claims),
-				},
-				AuthType: "jwt-auth",
-				Type:     "User",
-			},
-			Entitlements: *entitlements,
+				Entitlements: entitlements,
+			}
 		}
 	}
 
