@@ -23,7 +23,7 @@ import (
 var testUser = User{
 	Username:      "billy",
 	Password:      "password",
-	ID:            1234,
+	ID:            "1234",
 	Email:         "billy@billy.billy",
 	FirstName:     "Billy",
 	LastName:      "Bob",
