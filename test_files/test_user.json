@@ -2,7 +2,7 @@
     "user": {
         "username": "billy",
         "password": "password",
-        "id": 1234,
+        "id": "1234",
         "email": "billy@billy.billy",
         "first_name": "Billy",
         "last_name": "Bob",
