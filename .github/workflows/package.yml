@@ -7,12 +7,12 @@ name: Run Unit Tests
 
 jobs:
   testing:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v2
-        name: Set up golang 1.17
+        name: Set up golang 1.22
         with:
-          go-version: '1.17.7'
+          go-version: '1.22.12'
       - name: Check out source code
         uses: actions/checkout@v2
       - name: Gen private
