@@ -44,6 +44,7 @@ type User struct {
 	DisplayName   string `json:"display_name"`
 	Type          string `json:"type"`
 	Entitlements  string `json:"entitlements"`
+	UserID        string `json:"user_id"`
 }
 
 type Resp struct {
@@ -420,6 +421,7 @@ func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*identity.XRHID, erro
 						OrgAdmin:  getBoolClaim("is_org_admin", claims),
 						Internal:  getBoolClaim("is_internal", claims),
 						Locale:    getStringClaim("org_id", claims),
+						UserID:    getStringClaim("user_id", claims),
 					},
 					AuthType: "jwt-auth",
 					Type:     "User",
