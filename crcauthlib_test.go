@@ -331,6 +331,7 @@ func TestProcessRequestBearerAuthJWTValid(t *testing.T) {
 
 	assert.Equal(t, "User", ident.Identity.Type)
 	assert.Equal(t, "jwt-auth", ident.Identity.AuthType)
+	assert.Equal(t, "2112", ident.Identity.User.UserID)
 	assert.NotEqual(t, "ServiceAccount", ident.Identity.Type)
 }
 
