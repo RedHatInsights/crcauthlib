@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-go@v2
-        name: Set up golang 1.22
+        name: Set up golang 1.25
         with:
-          go-version: '1.22.12'
+          go-version: '1.25.5'
       - name: Check out source code
         uses: actions/checkout@v2
       - name: Gen private
