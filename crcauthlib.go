@@ -302,6 +302,7 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*id
 					OrgAdmin:  respData.User.IsOrgAdmin,
 					Internal:  respData.User.IsInternal,
 					Locale:    respData.User.Locale,
+					UserID:    respData.User.UserID,
 				},
 				AuthType: "basic-auth",
 				Type:     respData.User.Type,
