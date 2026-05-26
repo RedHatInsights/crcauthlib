@@ -1,10 +1,10 @@
 module github.com/redhatinsights/crcauthlib
 
-go 1.25.5
+go 1.25
 
 require (
 	github.com/golang-jwt/jwt/v4 v4.5.2
-	github.com/redhatinsights/platform-go-middlewares/v2 v2.0.0
+	github.com/redhatinsights/platform-go-middlewares/v2 v2.1.0
 	github.com/stretchr/testify v1.11.1
 )
 
