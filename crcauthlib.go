@@ -4,6 +4,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,8 +14,15 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v4"
 	"github.com/golang-jwt/jwt/v4/request"
-	"github.com/redhatinsights/crcauthlib/deps"
 	identity "github.com/redhatinsights/platform-go-middlewares/v2/identity"
+
+	"github.com/redhatinsights/crcauthlib/deps"
+)
+
+const (
+	authType                   = "jwt-auth"
+	serviceAccountIdentityType = "ServiceAccount"
+	userIdentityType           = "User"
 )
 
 type Registration struct {
@@ -92,7 +100,7 @@ func (crc *CRCAuthValidator) ProcessRequest(r *http.Request) (*identity.XRHID, e
 		return crc.processJWTCookieRequest(r)
 	} else {
 		fmt.Println("incoming request: unable to determine auth type")
-		return nil, fmt.Errorf("bad auth type")
+		return nil, errors.New("bad auth type")
 	}
 }
 
@@ -107,10 +115,14 @@ func (crc *CRCAuthValidator) ProcessToken(tokenString string) (*identity.XRHID, 
 
 func (crc *CRCAuthValidator) grabVerify() error {
 	if crc.config.BOPUrl != "" {
-		resp, err := deps.HTTP.Get(fmt.Sprintf("%s/v1/jwt", crc.config.BOPUrl))
+		resp, err := deps.HTTP.Get(crc.config.BOPUrl + "/v1/jwt")
 		if err != nil {
 			return fmt.Errorf("could not obtain key: %s", err.Error())
 		}
+		if resp.Body != nil {
+			defer resp.Body.Close()
+		}
+
 		key, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return fmt.Errorf("could not read key body: %s", err.Error())
@@ -202,7 +214,7 @@ func (crc *CRCAuthValidator) ValidateJWTHeaderRequest(r *http.Request) (*jwt.Tok
 
 // Private Methods
 func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*identity.XRHID, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/check_registration", crc.config.BOPUrl), nil)
+	req, err := http.NewRequest(http.MethodGet, crc.config.BOPUrl+"/v1/check_registration", nil)
 	if err != nil {
 		return nil, fmt.Errorf("could not prep request :%w", err)
 	}
@@ -213,24 +225,25 @@ func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*identity.XRHI
 	if err != nil {
 		return nil, fmt.Errorf("could not reach reg endpoint :%w", err)
 	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("system CN not recognised")
+		return nil, errors.New("system CN not recognised")
 	}
 
 	dta, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		return nil, fmt.Errorf("could not extract registration information")
+		return nil, errors.New("could not extract registration information")
 	}
-
-	resp.Body.Close()
 
 	obj := &Registration{}
 	err = json.Unmarshal(dta, obj)
 
 	if err != nil {
-		return nil, fmt.Errorf("could not unmarshal registration information")
+		return nil, errors.New("could not unmarshal registration information")
 	}
 
 	entitlements := map[string]identity.ServiceDetails{}
@@ -255,7 +268,7 @@ func (crc *CRCAuthValidator) processCert(cert *x509.Certificate) (*identity.XRHI
 }
 
 func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*identity.XRHID, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/v1/auth", crc.config.BOPUrl), nil)
+	req, err := http.NewRequest(http.MethodGet, crc.config.BOPUrl+"/v1/auth", nil)
 	req.SetBasicAuth(user, password)
 	if err != nil {
 		return nil, fmt.Errorf("could not create request: %s", err.Error())
@@ -265,13 +278,16 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*id
 	if err != nil {
 		return nil, fmt.Errorf("bad request: %s", err.Error())
 	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("bad request: %s", err.Error())
 	}
 	respData := &Resp{}
-	if resp.StatusCode == 200 {
+	if resp.StatusCode == http.StatusOK {
 		err := json.Unmarshal(data, respData)
 		if err != nil {
 			return nil, fmt.Errorf("error unmarshaling json: %s", err.Error())
@@ -311,7 +327,7 @@ func (crc *CRCAuthValidator) processBasicAuth(user string, password string) (*id
 		}
 		return ident, nil
 	} else {
-		return nil, fmt.Errorf("could not verify credentials")
+		return nil, errors.New("could not verify credentials")
 	}
 }
 
@@ -386,7 +402,6 @@ func getArrayString(claimName string, claims jwt.MapClaims) []string {
 func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*identity.XRHID, error) {
 	var ident identity.XRHID
 	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-
 		entitlements := map[string]identity.ServiceDetails{}
 
 		if getArrayString("newEntitlements", claims) != nil {
@@ -424,8 +439,8 @@ func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*identity.XRHID, erro
 						Locale:    getStringClaim("org_id", claims),
 						UserID:    getStringClaim("user_id", claims),
 					},
-					AuthType: "jwt-auth",
-					Type:     "User",
+					AuthType: authType,
+					Type:     userIdentityType,
 				},
 				Entitlements: entitlements,
 			}
@@ -436,10 +451,10 @@ func (crc *CRCAuthValidator) buildIdent(token *jwt.Token) (*identity.XRHID, erro
 					Internal: identity.Internal{
 						OrgID: getStringClaim("org_id", claims),
 					},
-					AuthType: "jwt-auth",
-					Type:     "ServiceAccount",
+					AuthType: authType,
+					Type:     serviceAccountIdentityType,
 					ServiceAccount: &identity.ServiceAccount{
-						Username: fmt.Sprintf("service-account-%s", getStringClaim("client_id", claims)),
+						Username: "service-account-" + getStringClaim("client_id", claims),
 						ClientId: getStringClaim("client_id", claims),
 					},
 				},
