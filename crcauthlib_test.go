@@ -15,9 +15,10 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/redhatinsights/crcauthlib/deps"
 	identity "github.com/redhatinsights/platform-go-middlewares/v2/identity"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/redhatinsights/crcauthlib/deps"
 )
 
 var testUser = User{
@@ -35,13 +36,14 @@ var testUser = User{
 	Locale:        "GB",
 	OrgID:         "5432",
 	DisplayName:   "Billy Bob",
-	Type:          "User",
+	Type:          userIdentityType,
 	Entitlements:  "",
 }
 
 type Claims struct {
 	User
 	jwt.RegisteredClaims
+
 	Entitlements   []string `json:"newEntitlements"`
 	ServiceAccount string   `json:"service_account,omitempty"`
 }
@@ -62,7 +64,6 @@ func CreateJWT(xrhid *identity.XRHID) (string, error) {
 		entitlement, err := json.Marshal(v)
 		if err != nil {
 			return "", fmt.Errorf("couldn't marshal entitlements: %w", err)
-
 		}
 		entitlements = append(entitlements, fmt.Sprintf("\"%s\": %s", k, entitlement))
 	}
@@ -89,7 +90,7 @@ func CreateJWT(xrhid *identity.XRHID) (string, error) {
 		Entitlements: entitlements,
 	}
 
-	if xrhid.Identity.Type == "ServiceAccount" {
+	if xrhid.Identity.Type == serviceAccountIdentityType {
 		claims.ServiceAccount = "true"
 	}
 
@@ -136,7 +137,7 @@ func MockHTTPResponseIsUserJSON() (*http.Response, error) {
 	io, _ := os.Open("test_files/test_user.json")
 	resp := http.Response{
 		Body:       io,
-		StatusCode: 200,
+		StatusCode: http.StatusOK,
 	}
 	return &resp, nil
 }
@@ -144,7 +145,7 @@ func MockHTTPResponseIsUserJSON() (*http.Response, error) {
 func MockHTTPResponseIsStatus400() (*http.Response, error) {
 	io, _ := os.Open("test_files/test_user.json")
 	resp := http.Response{
-		StatusCode: 400,
+		StatusCode: http.StatusBadRequest,
 		Body:       io,
 	}
 	return &resp, nil
@@ -180,13 +181,13 @@ func TestNewCRCAuthValidatorEmptyBopURLInvalidPEM(t *testing.T) {
 		BOPUrl: "",
 	}
 
-	os.Setenv("JWTPEM", "sup")
+	t.Setenv("JWTPEM", "sup")
 
 	validator, err := NewCRCAuthValidator(&conf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = validator.grabVerify()
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func TestNewCRCAuthValidatorEmptyBopURLValidPEM(t *testing.T) {
@@ -196,12 +197,11 @@ func TestNewCRCAuthValidatorEmptyBopURLValidPEM(t *testing.T) {
 
 	keyData, _ := os.ReadFile("test_files/public.pem")
 
-	os.Setenv("JWTPEM", string(keyData))
+	t.Setenv("JWTPEM", string(keyData))
 
 	_, err := NewCRCAuthValidator(&conf)
 
-	assert.Nil(t, err)
-
+	assert.NoError(t, err)
 }
 
 func TestNewCRCAuthValidatorBopURLCantGetKey(t *testing.T) {
@@ -212,12 +212,11 @@ func TestNewCRCAuthValidatorBopURLCantGetKey(t *testing.T) {
 	deps.HTTP = &MockHTTP{}
 
 	validator, err := NewCRCAuthValidator(&conf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	err = validator.grabVerify()
 
-	assert.NotNil(t, err)
-
+	assert.Error(t, err)
 }
 
 func TestNewCRCAuthValidatorBopURLCanGetKey(t *testing.T) {
@@ -235,9 +234,8 @@ func TestNewCRCAuthValidatorBopURLCanGetKey(t *testing.T) {
 	validator, err := NewCRCAuthValidator(&conf)
 	validator.grabVerify()
 
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, key, validator.pem)
-
 }
 
 func TestProcessRequestBasicAuthOK(t *testing.T) {
@@ -245,15 +243,15 @@ func TestProcessRequestBasicAuthOK(t *testing.T) {
 		logic: MockHTTPResponseIsUserJSON,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.SetBasicAuth(testUser.Username, testUser.Password)
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.Nil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.NoError(t, errTwo)
 
 	assert.Equal(t, "billy", ident.Identity.User.Username)
 	assert.Equal(t, "basic-auth", ident.Identity.AuthType)
@@ -265,15 +263,15 @@ func TestProcessRequestBasicAuthNotOK(t *testing.T) {
 		logic: MockHTTPResponseIsStatus400,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.SetBasicAuth(testUser.Username, testUser.Password)
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.NotNil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.Error(t, errTwo)
 	assert.Nil(t, ident)
 }
 
@@ -282,14 +280,14 @@ func TestProcessRequestBadAuthType(t *testing.T) {
 		logic: MockHTTPResponseIsStatus400,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.NotNil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.Error(t, errTwo)
 	assert.Nil(t, ident)
 }
 
@@ -298,15 +296,15 @@ func TestProcessRequestBearerAuthJWTInvalid(t *testing.T) {
 		logic: MockHTTPResponseIsStatus400,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.Header.Set("Authorization", "Bearer")
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.NotNil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.Error(t, errTwo)
 	assert.Nil(t, ident)
 }
 
@@ -316,27 +314,26 @@ func TestProcessRequestBearerAuthJWTValid(t *testing.T) {
 
 	keyData, _ := os.ReadFile("test_files/public.pem")
 
-	os.Setenv("JWTPEM", string(keyData))
+	t.Setenv("JWTPEM", string(keyData))
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.Header.Set("Authorization", "Bearer "+jwt)
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.Nil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.NoError(t, errTwo)
 	assert.NotNil(t, ident)
 
-	assert.Equal(t, "User", ident.Identity.Type)
-	assert.Equal(t, "jwt-auth", ident.Identity.AuthType)
+	assert.Equal(t, userIdentityType, ident.Identity.Type)
+	assert.Equal(t, authType, ident.Identity.AuthType)
 	assert.Equal(t, "2112", ident.Identity.User.UserID)
-	assert.NotEqual(t, "ServiceAccount", ident.Identity.Type)
+	assert.NotEqual(t, serviceAccountIdentityType, ident.Identity.Type)
 }
 
 func TestServiceAccountJWTValid(t *testing.T) {
-
 	xrhid := identity.XRHID{
 		Identity: identity.Identity{
 			AccountNumber:         "12345",
@@ -361,8 +358,8 @@ func TestServiceAccountJWTValid(t *testing.T) {
 			System:    &identity.System{},
 			Associate: &identity.Associate{},
 			X509:      &identity.X509{},
-			Type:      "ServiceAccount",
-			AuthType:  "jwt-auth",
+			Type:      serviceAccountIdentityType,
+			AuthType:  authType,
 		},
 		Entitlements: map[string]identity.ServiceDetails{"something": {
 			IsEntitled: true,
@@ -376,19 +373,19 @@ func TestServiceAccountJWTValid(t *testing.T) {
 
 	keyData, _ := os.ReadFile("test_files/public.pem")
 
-	os.Setenv("JWTPEM", string(keyData))
+	t.Setenv("JWTPEM", string(keyData))
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.Header.Set("Authorization", "Bearer "+tokenString)
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.Nil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.NoError(t, errTwo)
 	assert.NotNil(t, ident)
 	assert.Equal(t, xrhid.Identity.Internal.OrgID, ident.Identity.Internal.OrgID)
-	assert.Equal(t, "ServiceAccount", ident.Identity.Type)
+	assert.Equal(t, serviceAccountIdentityType, ident.Identity.Type)
 }
 
 func TestProcessCookieAuthJWTValid(t *testing.T) {
@@ -401,21 +398,21 @@ func TestProcessCookieAuthJWTValid(t *testing.T) {
 
 	keyData, _ := os.ReadFile("test_files/public.pem")
 
-	os.Setenv("JWTPEM", string(keyData))
+	t.Setenv("JWTPEM", string(keyData))
 
 	oreo := http.Cookie{}
 	oreo.Name = "cs_jwt"
 	oreo.Value = jwt
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.AddCookie(&oreo)
 
 	c, errOne := NewCRCAuthValidator(&ValidatorConfig{})
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.Nil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.NoError(t, errTwo)
 	assert.NotNil(t, ident)
 }
 
@@ -424,7 +421,7 @@ func TestProcessRequestCertAuthOK(t *testing.T) {
 		logic: MockHTTPResponseCertGood,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.Header.Add("x-rh-check-reg", "boop")
 	req.TLS = &tls.ConnectionState{
 		PeerCertificates: []*x509.Certificate{{
@@ -439,8 +436,8 @@ func TestProcessRequestCertAuthOK(t *testing.T) {
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.Nil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.NoError(t, errTwo)
 	assert.Equal(t, "cnBoop", ident.Identity.System.CommonName)
 	assert.Equal(t, "54321", ident.Identity.OrgID)
 	assert.Equal(t, "54321", ident.Identity.Internal.OrgID)
@@ -451,7 +448,7 @@ func TestProcessRequestCertAuthNotOK(t *testing.T) {
 		logic: MockHTTPResponseCertNotGood,
 	}
 
-	req, _ := http.NewRequest("GET", "", nil)
+	req, _ := http.NewRequest(http.MethodGet, "", nil)
 	req.Header.Add("x-rh-check-reg", "boop")
 	req.TLS = &tls.ConnectionState{
 		PeerCertificates: []*x509.Certificate{{
@@ -466,7 +463,7 @@ func TestProcessRequestCertAuthNotOK(t *testing.T) {
 
 	ident, errTwo := c.ProcessRequest(req)
 
-	assert.Nil(t, errOne)
-	assert.NotNil(t, errTwo)
+	assert.NoError(t, errOne)
+	assert.Error(t, errTwo)
 	assert.Nil(t, ident)
 }

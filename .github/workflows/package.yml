@@ -1,23 +1,52 @@
 ---
 name: Run Unit Tests
 
-'on':
-  - pull_request
-  - push
+on:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+    - master
+
+permissions: {}
 
 jobs:
-  testing:
+  lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
-      - uses: actions/setup-go@v2
-        name: Set up golang 1.25
-        with:
-          go-version: '1.25.5'
-      - name: Check out source code
-        uses: actions/checkout@v2
-      - name: Gen private
-        run: openssl genrsa -out private.pem 2048
-      - name: Gen public
-        run: openssl rsa -in private.pem -outform PEM -pubout -out public.pem
-      - name: Run Tests
-        run: go test
+    - name: Check out source code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        show-progress: false
+    - name: Install Go
+      uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      with:
+        go-version-file: go.mod
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
+      with:
+        only-new-issues: true
+
+  testing:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        go: [ "1.25", "1.26" ]
+        os: [ "ubuntu-latest", "macos-latest" ]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Check out source code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        show-progress: false
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+      name: Set up golang 1.25
+      with:
+        go-version: ${{ matrix.go }}
+    - name: Run Tests
+      run: make coverage
