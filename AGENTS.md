@@ -12,7 +12,7 @@ crcauthlib is a Go library that provides JWT, X.509 certificate, and HTTP Basic 
 
 **Dev/Test:**
 - `github.com/stretchr/testify` (v1.11.1) - Testing assertions
-- `golangci-lint` (v9.2.1) - Comprehensive linting (48 linters)
+- `golangci-lint` (v2.12.2) - Comprehensive linting (48 linters)
 
 ## Development Commands
 
@@ -44,7 +44,7 @@ make all
 
 ## Code Style
 
-- **Linter**: golangci-lint v9.2.1 with 48 enabled linters (see `.golangci.yml`)
+- **Linter**: golangci-lint v2.12.2 with 48 enabled linters (see `.golangci.yml`)
 - **Formatter**: gofmt + goimports (enforced by linter)
 - **Line length**: No strict limit, but gofmt's natural wrapping applies
 - **Go version**: 1.25 minimum (specified in go.mod)
